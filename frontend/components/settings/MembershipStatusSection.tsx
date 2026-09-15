@@ -1,7 +1,7 @@
 import { MembershipBadge } from "../MembershipBadge";
 
 interface MembershipStatusSectionProps {
-  chapterMembershipActive: boolean;
+  chapterMembershipActive: boolean | null;
 }
 
 export function MembershipStatusSection({

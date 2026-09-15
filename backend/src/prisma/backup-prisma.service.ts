@@ -20,7 +20,8 @@ export class BackupPrismaService
   implements OnModuleInit, OnModuleDestroy
 {
   private readonly logger = new Logger(BackupPrismaService.name);
-  private readonly enabled: boolean;
+  private enabled: boolean;
+  private connected = false;
   private readonly hostname: string | null;
 
   constructor() {
@@ -59,17 +60,27 @@ export class BackupPrismaService
     }
 
     const kind = classifyDatabaseHost(this.hostname);
-    await this.$connect();
-    this.logger.log(
-      `Backup database connected (host=${this.hostname ?? 'unknown'}, kind=${kind})`,
-    );
+    try {
+      await this.$connect();
+      this.connected = true;
+      this.logger.log(
+        `Backup database connected (host=${this.hostname ?? 'unknown'}, kind=${kind})`,
+      );
+    } catch (error) {
+      this.connected = false;
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Backup database unavailable (host=${this.hostname ?? 'unknown'}, kind=${kind}): ${message}. Primary remains up; mirror will retry.`,
+      );
+    }
   }
 
   async onModuleDestroy() {
-    if (!this.enabled) {
+    if (!this.enabled || !this.connected) {
       return;
     }
     await this.$disconnect();
+    this.connected = false;
     this.logger.log('Backup database disconnected');
   }
 }

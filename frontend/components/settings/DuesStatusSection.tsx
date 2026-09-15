@@ -11,11 +11,13 @@ import { api } from "@/lib/api";
 interface DuesStatusSectionProps {
   chapterDuesSelfReported?: boolean;
   nationalDuesSelfReported?: boolean;
+  ready?: boolean;
 }
 
 export function DuesStatusSection({
   chapterDuesSelfReported = false,
   nationalDuesSelfReported = false,
+  ready = true,
 }: DuesStatusSectionProps) {
   const [chapterDuesPaid, setChapterDuesPaid] = useState(
     !!chapterDuesSelfReported,
@@ -26,12 +28,13 @@ export function DuesStatusSection({
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
-  // Sync when parent finishes loading getMe (avoid a second fetch here).
+  // Sync from parent getMe. Do not depend on hasChanges — flipping it after a
+  // successful save would otherwise restore stale parent props.
   useEffect(() => {
-    if (hasChanges) return;
     setChapterDuesPaid(!!chapterDuesSelfReported);
     setNationalDuesPaid(!!nationalDuesSelfReported);
-  }, [chapterDuesSelfReported, nationalDuesSelfReported, hasChanges]);
+    setHasChanges(false);
+  }, [chapterDuesSelfReported, nationalDuesSelfReported]);
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -74,6 +77,7 @@ export function DuesStatusSection({
           <Checkbox
             id="settings-chapter-dues"
             checked={chapterDuesPaid}
+            disabled={!ready || isSaving}
             onCheckedChange={(checked) => {
               setChapterDuesPaid(checked === true);
               setHasChanges(true);
@@ -92,6 +96,7 @@ export function DuesStatusSection({
           <Checkbox
             id="settings-national-dues"
             checked={nationalDuesPaid}
+            disabled={!ready || isSaving}
             onCheckedChange={(checked) => {
               setNationalDuesPaid(checked === true);
               setHasChanges(true);
@@ -111,7 +116,7 @@ export function DuesStatusSection({
         <div className="mt-6 flex justify-end">
           <Button
             onClick={handleSave}
-            disabled={isSaving}
+            disabled={isSaving || !ready}
             className="bg-[#00843D] hover:bg-[#006830] text-white"
           >
             {isSaving ? (

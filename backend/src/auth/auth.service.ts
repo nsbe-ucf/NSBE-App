@@ -1,10 +1,11 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient } from '@supabase/supabase-js';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private supabaseAdmin: ReturnType<typeof createClient> | null = null;
 
   constructor(
@@ -190,20 +191,9 @@ export class AuthService {
       throw new Error('Supabase Admin not configured');
     }
 
-    // Members are stored lowercase; normalize so mixed-case input still matches.
+    // Always hit Supabase with the same work for any email so missing vs
+    // existing accounts are not distinguishable by status or timing.
     const normalizedEmail = email.toLowerCase().trim();
-
-    const member = await this.prisma.member.findUnique({
-      where: { email: normalizedEmail },
-    });
-
-    if (!member) {
-      // Don't reveal whether email exists or not for security
-      return {
-        success: true,
-        message: 'If an account exists, a password reset email has been sent.',
-      };
-    }
 
     // Redirect straight to /reset-password so the recovery hash/code is not
     // lost on an intermediate client-side hop through /auth/callback.
@@ -218,7 +208,9 @@ export class AuthService {
     );
 
     if (error) {
-      throw new Error(`Failed to send password reset email: ${error.message}`);
+      this.logger.error(
+        `Password reset email failed for a request: ${error.message}`,
+      );
     }
 
     return {

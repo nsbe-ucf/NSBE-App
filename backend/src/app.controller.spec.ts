@@ -27,11 +27,14 @@ describe('AppController', () => {
   });
 
   describe('health/db', () => {
-    it('should report primary host kind without secrets', () => {
+    it('should report primary host kind without secrets or hostnames', () => {
       const status = appController.getDatabaseHealth();
       expect(status.policy.expectedPrimary).toBe('supabase');
       expect(status.primary).toHaveProperty('kind');
+      expect(status.primary).not.toHaveProperty('host');
+      expect(status.primary).not.toHaveProperty('allowRailwayPrimary');
       expect(status.backup).toHaveProperty('configured');
+      expect(status.backup).not.toHaveProperty('host');
     });
   });
 });

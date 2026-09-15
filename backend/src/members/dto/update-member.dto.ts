@@ -7,6 +7,7 @@ import {
   IsUrl,
   MaxLength,
   IsBoolean,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdateMemberDto {
@@ -50,11 +51,11 @@ export class UpdateMemberDto {
   @MaxLength(50)
   discordUsername?: string;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   chapterDuesSelfReported?: boolean;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   nationalDuesSelfReported?: boolean;
 }

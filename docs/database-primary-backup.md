@@ -16,8 +16,8 @@
 ## How backup sync works
 
 1. **Boot guard** — If `DATABASE_URL` hostname looks like Railway (`*.railway.internal`, `*.rlwy.net`, …) and `ALLOW_RAILWAY_PRIMARY` is not truthy, the API **refuses to start**. This prevents silently serving stale Railway seed data while Auth is on Supabase.
-2. **Periodic mirror** — When `BACKUP_DATABASE_URL` is set (and its host differs from primary), `DatabaseMirrorService` upserts all Prisma app tables from primary → backup on an interval (`BACKUP_SYNC_INTERVAL_MS`, default 5 minutes; first run ~20s after boot). Failures are logged and never affect user requests. This stays compatible with Prisma 6 (no `$use` middleware) without a fragile second write path.
-3. **Baseline sync** — After cutover, also run a one-shot full copy so the backup is warm before the first interval:
+2. **Periodic mirror** — When `BACKUP_DATABASE_URL` is set (and its host differs from primary), `DatabaseMirrorService` upserts all Prisma app tables from primary → backup on an interval (`BACKUP_SYNC_INTERVAL_MS`, default 5 minutes; first run ~20s after boot), then deletes backup-only rows in reverse FK order. Failures are logged and never affect user requests. This stays compatible with Prisma 6 (no `$use` middleware) without a fragile second write path.
+3. **Baseline sync** — After cutover, also run a one-shot full copy so the backup is warm before the first interval. The script refuses a non-Supabase source or non-Railway target unless `BACKUP_SYNC_RECOVERY=true`.
 
 ```bash
 cd backend
@@ -49,7 +49,7 @@ Verify (hostnames only):
 curl -s -H "X-API-Key: $API_KEY" https://<backend>/api/health/db
 ```
 
-Expect `primary.kind === "supabase"` and `backup.configured === true` with `backup.kind === "railway"`.
+Expect `primary.kind === "supabase"` and `backup.configured === true` with `backup.kind === "railway"`. Hostnames are not returned on this endpoint.
 
 ## Staging cutover (NSBE-UCF Railway)
 
@@ -78,7 +78,10 @@ Only if Supabase Postgres is unavailable:
 1. Set `DATABASE_URL` / `DIRECT_URL` to Railway Postgres.
 2. Set `ALLOW_RAILWAY_PRIMARY=true`.
 3. Redeploy. Expect warn logs that Railway is primary.
-4. After Supabase recovery: reverse the cutover, run `db:sync-backup` if Railway accumulated writes you need to reconcile, clear `ALLOW_RAILWAY_PRIMARY`.
+4. After Supabase recovery: reverse the URL roles only after reconciling writes made on Railway.
+   - Point `DATABASE_URL` at Railway (the DR source of writes) and `BACKUP_DATABASE_URL` at Supabase.
+   - Run `BACKUP_SYNC_RECOVERY=true npm run db:sync-backup` so the script allows Railway→Supabase.
+   - Restore normal roles (`DATABASE_URL` = Supabase, `BACKUP_DATABASE_URL` = Railway) and clear `ALLOW_RAILWAY_PRIMARY` and `BACKUP_SYNC_RECOVERY`.
 
 **Caution:** Auth remains on Supabase. Failover covers Prisma app data only. If Railway lagged behind, you may serve slightly stale friends/events/points until re-synced.
 

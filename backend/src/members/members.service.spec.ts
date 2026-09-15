@@ -178,7 +178,8 @@ describe('MembersService', () => {
       const markedAt = etLocalToUtc(2025, 8, 15, 10, 0, 0, 0);
       const now = etLocalToUtc(2026, 8, 1, 0, 0, 0, 0);
 
-      prisma.member.update.mockResolvedValue({
+      prisma.member.updateMany.mockResolvedValue({ count: 1 });
+      prisma.member.findUnique.mockResolvedValue({
         id: 'member-1',
         chapterMembershipActive: false,
         chapterMembershipMarkedAt: markedAt,
@@ -195,10 +196,18 @@ describe('MembersService', () => {
 
       expect(result.chapterMembershipActive).toBe(false);
       expect(result.chapterMembershipMarkedAt).toEqual(markedAt);
-      expect(prisma.member.update).toHaveBeenCalledWith({
-        where: { id: 'member-1' },
+      expect(prisma.member.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'member-1',
+          chapterMembershipActive: true,
+          OR: [
+            { chapterMembershipMarkedAt: null },
+            { chapterMembershipMarkedAt: { lt: expect.any(Date) } },
+          ],
+        },
         data: { chapterMembershipActive: false },
       });
+      expect(prisma.member.update).not.toHaveBeenCalled();
       expect(cache.del).toHaveBeenCalledWith('user:member-1');
       expect(cache.delPattern).toHaveBeenCalledWith('members:');
     });
@@ -218,6 +227,32 @@ describe('MembersService', () => {
 
       expect(result.chapterMembershipActive).toBe(true);
       expect(prisma.member.update).not.toHaveBeenCalled();
+      expect(prisma.member.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('keeps a concurrent renewal when the expiry update matches no row', async () => {
+      const markedAt = etLocalToUtc(2025, 8, 15, 10, 0, 0, 0);
+      const renewedAt = etLocalToUtc(2026, 8, 1, 0, 5, 0, 0);
+      const now = etLocalToUtc(2026, 8, 1, 0, 0, 0, 0);
+
+      prisma.member.updateMany.mockResolvedValue({ count: 0 });
+      prisma.member.findUnique.mockResolvedValue({
+        id: 'member-1',
+        chapterMembershipActive: true,
+        chapterMembershipMarkedAt: renewedAt,
+      });
+
+      const result = await service.applyChapterMembershipReset(
+        {
+          id: 'member-1',
+          chapterMembershipActive: true,
+          chapterMembershipMarkedAt: markedAt,
+        },
+        now,
+      );
+
+      expect(result.chapterMembershipActive).toBe(true);
+      expect(result.chapterMembershipMarkedAt).toEqual(renewedAt);
     });
   });
 

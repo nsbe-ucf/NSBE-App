@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -26,12 +26,32 @@ export function ResetPassword({ onNavigate }: ResetPasswordProps) {
   const [success, setSuccess] = useState(false);
   const [tokenError, setTokenError] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
+  const recoveryReadyRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
+    let subscription: { unsubscribe: () => void } | undefined;
+
+    const markReady = () => {
+      recoveryReadyRef.current = true;
+      if (!cancelled) {
+        setSessionReady(true);
+      }
+    };
 
     const establishRecoverySession = async () => {
       try {
+        const authListener = supabase.auth.onAuthStateChange((event) => {
+          if (event === "PASSWORD_RECOVERY") {
+            markReady();
+          }
+        });
+        subscription = authListener.data.subscription;
+        if (cancelled) {
+          subscription.unsubscribe();
+          return;
+        }
+
         const hashParams = new URLSearchParams(
           window.location.hash.substring(1)
         );
@@ -48,7 +68,7 @@ export function ResetPassword({ onNavigate }: ResetPasswordProps) {
           if (error) throw error;
           if (!cancelled) {
             window.history.replaceState(null, "", window.location.pathname);
-            setSessionReady(true);
+            markReady();
           }
           return;
         }
@@ -62,21 +82,16 @@ export function ResetPassword({ onNavigate }: ResetPasswordProps) {
           if (error) throw error;
           if (!cancelled) {
             window.history.replaceState(null, "", window.location.pathname);
-            setSessionReady(true);
+            markReady();
           }
           return;
         }
 
-        // detectSessionInUrl may already have consumed the hash/code
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (session) {
-          if (!cancelled) setSessionReady(true);
-          return;
+        // Wait briefly for detectSessionInUrl / PASSWORD_RECOVERY.
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        if (!cancelled && !recoveryReadyRef.current) {
+          setTokenError(true);
         }
-
-        if (!cancelled) setTokenError(true);
       } catch (err) {
         console.error("Failed to establish recovery session:", err);
         if (!cancelled) setTokenError(true);
@@ -87,6 +102,7 @@ export function ResetPassword({ onNavigate }: ResetPasswordProps) {
 
     return () => {
       cancelled = true;
+      subscription?.unsubscribe();
     };
   }, []);
 
@@ -169,6 +185,12 @@ export function ResetPassword({ onNavigate }: ResetPasswordProps) {
       setIsLoading(true);
 
       try {
+        if (!recoveryReadyRef.current) {
+          throw new Error(
+            "Your reset link is invalid or has expired. Please request a new one."
+          );
+        }
+
         const {
           data: { session },
         } = await supabase.auth.getSession();

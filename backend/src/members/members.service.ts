@@ -350,17 +350,43 @@ export class MembersService {
       };
     }
 
-    await this.prisma.member.update({
-      where: { id: member.id },
+    await this.prisma.member.updateMany({
+      where: {
+        id: member.id,
+        chapterMembershipActive: true,
+        OR: [
+          { chapterMembershipMarkedAt: null },
+          {
+            chapterMembershipMarkedAt: {
+              lt: getMostRecentJuly31DeadlineET(now),
+            },
+          },
+        ],
+      },
       data: { chapterMembershipActive: false },
+    });
+
+    const fresh = await this.prisma.member.findUnique({
+      where: { id: member.id },
+      select: {
+        chapterMembershipActive: true,
+        chapterMembershipMarkedAt: true,
+      },
     });
 
     this.cache.del(`user:${member.id}`);
     this.cache.delPattern('members:');
 
+    if (!fresh) {
+      return {
+        chapterMembershipActive: false,
+        chapterMembershipMarkedAt: member.chapterMembershipMarkedAt,
+      };
+    }
+
     return {
-      chapterMembershipActive: false,
-      chapterMembershipMarkedAt: member.chapterMembershipMarkedAt,
+      chapterMembershipActive: fresh.chapterMembershipActive,
+      chapterMembershipMarkedAt: fresh.chapterMembershipMarkedAt,
     };
   }
 

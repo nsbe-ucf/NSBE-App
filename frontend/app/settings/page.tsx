@@ -20,6 +20,7 @@ export default function SettingsPage() {
     chapterDuesSelfReported: false,
     nationalDuesSelfReported: false,
   });
+  const [duesReady, setDuesReady] = useState(false);
 
   useEffect(() => {
     const userStr = localStorage.getItem("user");
@@ -49,7 +50,10 @@ export default function SettingsPage() {
           chapterDuesSelfReported: !!data.chapterDuesSelfReported,
           nationalDuesSelfReported: !!data.nationalDuesSelfReported,
         }));
-      }).catch(() => {});
+        setDuesReady(true);
+      }).catch(() => {
+        setDuesReady(false);
+      });
     }
   }, []);
 
@@ -59,7 +63,11 @@ export default function SettingsPage() {
 
   return (
     <DashboardLayout>
-      <Settings memberData={memberData} onBack={handleBack} />
+      <Settings
+        memberData={memberData}
+        duesReady={duesReady}
+        onBack={handleBack}
+      />
     </DashboardLayout>
   );
 }

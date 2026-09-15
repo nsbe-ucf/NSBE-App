@@ -104,5 +104,15 @@ export function assertPrimaryDatabasePolicy(
     );
   }
 
+  if (kind === 'unknown') {
+    throw new Error(
+      [
+        'Primary DATABASE_URL host is not recognized as Supabase, Railway, or local.',
+        `Host: ${hostname ?? '(unparseable)'}.`,
+        'Point DATABASE_URL / DIRECT_URL at the Supabase project that matches Auth.',
+      ].join(' '),
+    );
+  }
+
   return { hostname, kind };
 }

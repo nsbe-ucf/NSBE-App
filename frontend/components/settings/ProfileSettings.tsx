@@ -21,6 +21,7 @@ interface ProfileSettingsProps {
     chapterDuesSelfReported?: boolean;
     nationalDuesSelfReported?: boolean;
   };
+  duesReady?: boolean;
 }
 
 const MAJORS = [
@@ -42,7 +43,10 @@ const GRADUATION_YEARS = Array.from(
   (_, i) => new Date().getFullYear() + i
 );
 
-export function ProfileSettings({ memberData }: ProfileSettingsProps) {
+export function ProfileSettings({
+  memberData,
+  duesReady = false,
+}: ProfileSettingsProps) {
   const [formData, setFormData] = useState({
     firstName: memberData.firstName || "",
     lastName: memberData.lastName || "",
@@ -56,7 +60,10 @@ export function ProfileSettings({ memberData }: ProfileSettingsProps) {
   });
   const [profilePhoto, setProfilePhoto] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
-  const [chapterMembershipActive, setChapterMembershipActive] = useState(false);
+  const [chapterMembershipActive, setChapterMembershipActive] = useState<
+    boolean | null
+  >(null);
+  const [profileReady, setProfileReady] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -85,10 +92,17 @@ export function ProfileSettings({ memberData }: ProfileSettingsProps) {
           });
           setProfilePhoto(data.photoUrl || "");
           setPreviewUrl(data.photoUrl || "");
-          setChapterMembershipActive(data.chapterMembershipActive ?? false);
+          setChapterMembershipActive(
+            typeof data.chapterMembershipActive === "boolean"
+              ? data.chapterMembershipActive
+              : null,
+          );
+          setProfileReady(true);
         }
       } catch (error) {
         console.error('Failed to fetch member data:', error);
+        setChapterMembershipActive(null);
+        setProfileReady(false);
       }
     };
 
@@ -554,6 +568,7 @@ export function ProfileSettings({ memberData }: ProfileSettingsProps) {
       <DuesStatusSection
         chapterDuesSelfReported={memberData.chapterDuesSelfReported}
         nationalDuesSelfReported={memberData.nationalDuesSelfReported}
+        ready={duesReady || profileReady}
       />
     </div>
   );

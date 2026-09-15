@@ -88,6 +88,14 @@ describe('database-url.util', () => {
       });
       expect(result.kind).toBe('railway');
     });
+
+    it('rejects an unrecognized primary host', () => {
+      expect(() =>
+        assertPrimaryDatabasePolicy({
+          DATABASE_URL: 'postgresql://u:p@db.example.com:5432/postgres',
+        }),
+      ).toThrow(/not recognized/);
+    });
   });
 
   describe('isTruthyEnv', () => {

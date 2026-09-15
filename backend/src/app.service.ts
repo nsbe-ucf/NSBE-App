@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import {
   classifyDatabaseHost,
   extractDatabaseHostname,
-  isTruthyEnv,
 } from './prisma/database-url.util';
 
 @Injectable()
@@ -12,7 +11,8 @@ export class AppService {
   }
 
   /**
-   * Ops-facing DB role summary. Hostnames only — never connection secrets.
+   * Public DB-role summary for cutover checks. Kinds only — no hostnames,
+   * connection strings, or ALLOW_RAILWAY_PRIMARY (those belong in logs/ops).
    */
   getDatabaseStatus() {
     const primaryHost = extractDatabaseHostname(process.env.DATABASE_URL);
@@ -22,12 +22,10 @@ export class AppService {
 
     return {
       primary: {
-        host: primaryHost,
         kind: primaryKind,
-        allowRailwayPrimary: isTruthyEnv(process.env.ALLOW_RAILWAY_PRIMARY),
       },
       backup: backupHost
-        ? { host: backupHost, kind: backupKind, configured: true }
+        ? { kind: backupKind, configured: true }
         : { configured: false },
       policy: {
         expectedPrimary: 'supabase',

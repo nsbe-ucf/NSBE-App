@@ -14,6 +14,7 @@ import { syncPrimaryToBackup } from '../src/prisma/backup-sync.util';
 import {
   classifyDatabaseHost,
   extractDatabaseHostname,
+  isTruthyEnv,
 } from '../src/prisma/database-url.util';
 
 async function main() {
@@ -27,14 +28,31 @@ async function main() {
   const primaryHost = extractDatabaseHostname(primaryUrl);
   const backupHost = extractDatabaseHostname(backupUrl);
 
+  const primaryKind = classifyDatabaseHost(primaryHost);
+  const backupKind = classifyDatabaseHost(backupHost);
+  const recovery = isTruthyEnv(process.env.BACKUP_SYNC_RECOVERY);
+
   console.log(
-    `Sync primary → backup | primary=${primaryHost} (${classifyDatabaseHost(primaryHost)}) | backup=${backupHost} (${classifyDatabaseHost(backupHost)})`,
+    `Sync primary → backup | primary=${primaryHost} (${primaryKind}) | backup=${backupHost} (${backupKind})${recovery ? ' | recovery=true' : ''}`,
   );
 
   if (primaryHost && backupHost && primaryHost === backupHost) {
     throw new Error(
       'Primary and backup hosts are identical; refusing to sync a database onto itself',
     );
+  }
+
+  if (!recovery) {
+    if (primaryKind !== 'supabase' && primaryKind !== 'local') {
+      throw new Error(
+        'Refusing sync from a non-Supabase source. Set BACKUP_SYNC_RECOVERY=true only for documented Railway→Supabase reconciliation.',
+      );
+    }
+    if (backupKind !== 'railway' && backupKind !== 'local') {
+      throw new Error(
+        'Refusing sync to a non-Railway target. Set BACKUP_SYNC_RECOVERY=true only for documented Railway→Supabase reconciliation.',
+      );
+    }
   }
 
   const primary = new PrismaClient({

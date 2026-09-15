@@ -1,11 +1,11 @@
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, ValidateIf } from 'class-validator';
 
 export class UpdateMemberDuesDto {
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   chapterDuesSelfReported?: boolean;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   nationalDuesSelfReported?: boolean;
 }

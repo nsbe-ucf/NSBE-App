@@ -84,7 +84,7 @@ nsbe-ucf-eventtracker/
 │   │   └── common/               # API key, roles, throttler-behind-proxy
 │   ├── prisma/schema.prisma      # Database schema
 │   ├── prisma/seed.ts            # Optional sample members
-│   ├── Dockerfile                # Multi-stage node:20-alpine, non-root user
+│   ├── Dockerfile                # Multi-stage node:22-alpine, non-root user
 │   └── docker-compose.yml        # Local Postgres + API
 ├── frontend/                     # Next.js App Router (port 3000)
 │   ├── app/                      # Route pages
@@ -596,7 +596,7 @@ If you reduce ESLint errors, lower `MAX_ERRORS` in the same PR so the improvemen
 **Frontend (Vercel)**
 
 - Root / app directory: `frontend`
-- Node 20
+- Node 22
 - Production URL: `https://nsbe-ucf-eventtracker-six.vercel.app`
 - Set the `NEXT_PUBLIC_*` variables (see checklist below)
 - Point `NEXT_PUBLIC_API_URL` at the Railway API (`https://nsbe-ucf-eventtracker-production-4454.up.railway.app/api`) **or** rewrite `/api` to the backend and leave the variable unset
@@ -605,7 +605,7 @@ If you reduce ESLint errors, lower `MAX_ERRORS` in the same PR so the improvemen
 
 - Production URL: `https://nsbe-ucf-eventtracker-production-4454.up.railway.app`
 - Bind to `0.0.0.0:$PORT` (Nest uses `process.env.PORT`, which Railway/Render inject)
-- Image: `backend/Dockerfile` (multi-stage, `node:20-alpine`, user `nestjs`)
+- Image: `backend/Dockerfile` (multi-stage, `node:22-alpine`, user `nestjs`)
 - On Compose start: `prisma migrate deploy && npm run start:prod` — you need a migration history for that path
 - Production/staging env must include `CORS_ORIGINS`, `FRONTEND_URL`, `APP_BASE_URL`, `DATABASE_URL`, `DIRECT_URL` (**Supabase** hosts), `SUPABASE_JWT_SECRET`, and (if used) OAuth + `API_KEY`
 - Set `BACKUP_DATABASE_URL` to Railway Postgres; leave `ALLOW_RAILWAY_PRIMARY` unset except documented DR ([`docs/database-primary-backup.md`](docs/database-primary-backup.md))

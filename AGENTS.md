@@ -34,7 +34,7 @@ Backend pattern: **controller → service → Prisma**. `PrismaModule` and `Cach
 
 ## Build, Test, and Development Commands
 
-Node `20.x` (see `.node-version`), npm `>=9.0.0`.
+Node `22.x` (see `.node-version`), npm `>=9.0.0`.
 
 - `make install`: install backend and frontend dependencies.
 - `make docker-db-up`: local PostgreSQL (`nsbe_user` / `nsbe_password` / `nsbe_eventtracker` on `:5432`).

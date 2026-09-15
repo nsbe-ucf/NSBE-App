@@ -19,7 +19,7 @@ export class AppController {
     return { status: 'ok' };
   }
 
-  /** Hostnames + roles for cutover verification (no secrets). */
+  /** DB role kinds for cutover verification (no hostnames or secrets). */
   @Get('health/db')
   getDatabaseHealth() {
     return this.appService.getDatabaseStatus();

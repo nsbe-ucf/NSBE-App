@@ -50,13 +50,25 @@ describe('UpdateMemberDuesDto', () => {
     expect(errors).toHaveLength(0);
   });
 
-  it('rejects non-boolean values', async () => {
+  it('rejects null chapterDuesSelfReported', async () => {
     const dto = plainToInstance(UpdateMemberDuesDto, {
-      chapterDuesSelfReported: 'true',
+      chapterDuesSelfReported: null,
+    });
+
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'chapterDuesSelfReported')).toBe(
+      true,
+    );
+  });
+
+  it('rejects null nationalDuesSelfReported', async () => {
+    const dto = plainToInstance(UpdateMemberDuesDto, {
       nationalDuesSelfReported: null,
     });
 
     const errors = await validate(dto);
-    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some((e) => e.property === 'nationalDuesSelfReported')).toBe(
+      true,
+    );
   });
 });
