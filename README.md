@@ -13,6 +13,7 @@ Full-stack web app for the UCF chapter of the [National Society of Black Enginee
 - [Repository layout](#repository-layout)
 - [Prerequisites](#prerequisites)
 - [Quick start](#quick-start)
+- [Supabase MCP (AI tooling)](#supabase-mcp-ai-tooling)
 - [Environment variables](#environment-variables)
 - [Database](#database)
 - [How the product works](#how-the-product-works)
@@ -92,6 +93,7 @@ nsbe-ucf-eventtracker/
 │   ├── lib/supabase.ts           # Browser Supabase client
 │   └── public/                   # Icons, PWA manifest
 ├── docs/                         # Extra design notes
+├── .cursor/mcp.json.example      # Secret-free Supabase/Vercel MCP template
 ├── .github/workflows/ci.yml      # Backend, frontend, and audit jobs
 └── Makefile                      # Dev / Docker / Prisma shortcuts
 ```
@@ -107,6 +109,7 @@ Every backend feature follows **controller → service → Prisma**. `PrismaModu
 - A [Supabase](https://supabase.com/) project with:
   - Auth enabled (email/password; Google and Discord providers if you want social login)
   - A **public** Storage bucket named `profile-photos`
+- (Optional, for AI agents) A Supabase **personal access token** on the chapter org — see [Supabase MCP](#supabase-mcp-ai-tooling)
 
 ---
 
@@ -146,6 +149,24 @@ make docker-up
 ```
 
 `JWT_SECRET` is required by Compose even though the API verifies **Supabase** JWTs with `SUPABASE_JWT_SECRET`. Generate a throwaway value with `openssl rand -base64 48`. Set `CORS_ORIGINS=http://localhost:3000` (Compose already defaults to that).
+
+---
+
+## Supabase MCP (AI tooling)
+
+Onboarding developers who want AI-agent access to this project’s Supabase instance (schema inspection, read SQL, migrations, Edge Functions, logs, and similar MCP tools) need a **team personal access token (PAT)** wired into their local MCP config. App runtime env (`DATABASE_URL`, `SUPABASE_JWT_SECRET`, service role key) is separate and does **not** unlock MCP.
+
+**Project ref (this NSBE app):** `hzcdeyzpdqhucypmiqey`
+
+1. Join / get invited to the chapter’s Supabase organization that owns that project.
+2. Create a PAT at [Supabase Account → Access Tokens](https://supabase.com/dashboard/account/tokens). Name it for your machine (for example `cursor-nsbe-mcp`).
+3. Copy [`.cursor/mcp.json.example`](.cursor/mcp.json.example) to the MCP config your harness uses:
+   - **Cursor (this repo):** `.cursor/mcp.json` (gitignored — do not commit tokens)
+   - **Other agents** (Claude Code, Codex, VS Code, etc.): the equivalent `mcp.json` / settings path for that tool — same `supabase-nsbe` HTTP server shape
+4. Put the PAT in the `Authorization: Bearer …` header, **or** set `SUPABASE_ACCESS_TOKEN` in your user environment and keep `${env:SUPABASE_ACCESS_TOKEN}` as in the example.
+5. Restart / reload the harness, enable the `supabase-nsbe` server, and confirm tools appear (for example list public tables).
+
+Never commit a real PAT. Prefer the example file in git and a local ignored config (or env interpolation) on each machine.
 
 ---
 
@@ -622,7 +643,7 @@ If you reduce ESLint errors, lower `MAX_ERRORS` in the same PR so the improvemen
 1. Branch from `main`; keep feature code next to its module (`backend/src/events/*` and `frontend/app/events/*`).
 2. Match existing commit style: short imperative, often Conventional Commits (`feat:`, `fix:`, `style:`).
 3. In the PR: what changed, how you tested, env/schema notes, and screenshots for UI.
-4. Never commit `.env` files or real keys.
+4. Never commit `.env` files, real keys, or `.cursor/mcp.json` (it can hold a Supabase PAT). Use `.cursor/mcp.json.example` and [Supabase MCP](#supabase-mcp-ai-tooling) when onboarding AI tooling.
 5. After `schema.prisma` edits: `npx prisma generate`, and record how to migrate/push.
 
 Agent-oriented notes (architecture dump, coding agent rules) live in [`docs/OVERVIEW.md`](docs/OVERVIEW.md), [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md), and [`AGENTS.md`](AGENTS.md). Point-system design tickets: [`docs/pointsystem-tickets/README.md`](docs/pointsystem-tickets/README.md).

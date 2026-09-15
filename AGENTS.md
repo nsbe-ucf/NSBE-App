@@ -65,9 +65,10 @@ PRs should include a description, linked issue or context, test commands run, da
 
 ## Security & Configuration Tips
 
-Do not commit real secrets. Templates: `backend/.env.example`, `frontend/.env.example` (copy frontend to `.env.local`).
+Do not commit real secrets. Templates: `backend/.env.example`, `frontend/.env.example` (copy frontend to `.env.local`). Local Cursor MCP: copy `.cursor/mcp.json.example` → `.cursor/mcp.json` (gitignored).
 
 - Backend must have `DATABASE_URL`, `DIRECT_URL`, `SUPABASE_JWT_SECRET` aimed at the **same** Supabase project. Staging/prod should set `BACKUP_DATABASE_URL` (Railway Postgres). Do not use Railway as primary except `ALLOW_RAILWAY_PRIMARY` disaster recovery. Production must set `CORS_ORIGINS` (comma-separated exact origins — no `*.vercel.app` wildcards). Pair `API_KEY` with frontend `NEXT_PUBLIC_API_KEY` when the gate is on.
 - After editing `backend/prisma/schema.prisma`, run Prisma generate and document how to migrate or `db push`.
 - Do not add default JWT/signing secrets in Docker or source. Do not weaken `forbidNonWhitelisted`, Helmet, or the named throttle on check-in-code.
 - Profile photos: JPEG/PNG/WebP, 5 MB, Supabase bucket `profile-photos`.
+- **Supabase MCP:** Onboarding developers who need AI-agent DB/ops tools must create a Supabase org PAT and wire it into their harness `mcp.json` (see README [Supabase MCP](README.md#supabase-mcp-ai-tooling)). Runtime `.env` keys do not grant MCP access. Never commit the PAT.
