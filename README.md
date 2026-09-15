@@ -2,7 +2,7 @@
 
 Full-stack web app for the UCF chapter of the [National Society of Black Engineers](https://nsbe.org/). It manages chapter events, tracks attendance with QR codes and short check-in codes, and rewards participation with semester achievements and a points system.
 
-**Live stack:** frontend on Vercel, backend on Railway, database and auth on Supabase.
+**Live stack:** frontend on Vercel, backend on Railway, **primary** database + auth on Supabase Postgres/Auth (Railway Postgres is backup only — see [`docs/database-primary-backup.md`](docs/database-primary-backup.md)).
 
 ---
 
@@ -13,6 +13,7 @@ Full-stack web app for the UCF chapter of the [National Society of Black Enginee
 - [Repository layout](#repository-layout)
 - [Prerequisites](#prerequisites)
 - [Quick start](#quick-start)
+- [Supabase MCP (AI tooling)](#supabase-mcp-ai-tooling)
 - [Environment variables](#environment-variables)
 - [Database](#database)
 - [How the product works](#how-the-product-works)
@@ -83,7 +84,7 @@ nsbe-ucf-eventtracker/
 │   │   └── common/               # API key, roles, throttler-behind-proxy
 │   ├── prisma/schema.prisma      # Database schema
 │   ├── prisma/seed.ts            # Optional sample members
-│   ├── Dockerfile                # Multi-stage node:20-alpine, non-root user
+│   ├── Dockerfile                # Multi-stage node:22-alpine, non-root user
 │   └── docker-compose.yml        # Local Postgres + API
 ├── frontend/                     # Next.js App Router (port 3000)
 │   ├── app/                      # Route pages
@@ -92,6 +93,7 @@ nsbe-ucf-eventtracker/
 │   ├── lib/supabase.ts           # Browser Supabase client
 │   └── public/                   # Icons, PWA manifest
 ├── docs/                         # Extra design notes
+├── .cursor/mcp.json.example      # Secret-free Supabase/Vercel MCP template
 ├── .github/workflows/ci.yml      # Backend, frontend, and audit jobs
 └── Makefile                      # Dev / Docker / Prisma shortcuts
 ```
@@ -107,6 +109,7 @@ Every backend feature follows **controller → service → Prisma**. `PrismaModu
 - A [Supabase](https://supabase.com/) project with:
   - Auth enabled (email/password; Google and Discord providers if you want social login)
   - A **public** Storage bucket named `profile-photos`
+- (Optional, for AI agents) A Supabase **personal access token** on the chapter org — see [Supabase MCP](#supabase-mcp-ai-tooling)
 
 ---
 
@@ -149,6 +152,24 @@ make docker-up
 
 ---
 
+## Supabase MCP (AI tooling)
+
+Onboarding developers who want AI-agent access to this project’s Supabase instance (schema inspection, read SQL, migrations, Edge Functions, logs, and similar MCP tools) need a **team personal access token (PAT)** wired into their local MCP config. App runtime env (`DATABASE_URL`, `SUPABASE_JWT_SECRET`, service role key) is separate and does **not** unlock MCP.
+
+**Project ref (this NSBE app):** `hzcdeyzpdqhucypmiqey`
+
+1. Join / get invited to the chapter’s Supabase organization that owns that project.
+2. Create a PAT at [Supabase Account → Access Tokens](https://supabase.com/dashboard/account/tokens). Name it for your machine (for example `cursor-nsbe-mcp`).
+3. Copy [`.cursor/mcp.json.example`](.cursor/mcp.json.example) to the MCP config your harness uses:
+   - **Cursor (this repo):** `.cursor/mcp.json` (gitignored — do not commit tokens)
+   - **Other agents** (Claude Code, Codex, VS Code, etc.): the equivalent `mcp.json` / settings path for that tool — same `supabase-nsbe` HTTP server shape
+4. Put the PAT in the `Authorization: Bearer …` header, **or** set `SUPABASE_ACCESS_TOKEN` in your user environment and keep `${env:SUPABASE_ACCESS_TOKEN}` as in the example.
+5. Restart / reload the harness, enable the `supabase-nsbe` server, and confirm tools appear (for example list public tables).
+
+Never commit a real PAT. Prefer the example file in git and a local ignored config (or env interpolation) on each machine.
+
+---
+
 ## Environment variables
 
 Do not commit real secrets. Templates live at `backend/.env.example` and `frontend/.env.example`.
@@ -157,10 +178,13 @@ Do not commit real secrets. Templates live at `backend/.env.example` and `fronte
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `DATABASE_URL` | Yes | Pooled Postgres URL (Supabase pooler in prod, local Docker in dev) |
-| `DIRECT_URL` | Yes | Direct Postgres URL (Prisma migrations / `db push`) |
+| `DATABASE_URL` | Yes | **Primary** pooled Postgres URL — must be **Supabase** in staging/production (local Docker in dev) |
+| `DIRECT_URL` | Yes | Direct Postgres URL for Prisma migrations / `db push` (same Supabase project) |
+| `BACKUP_DATABASE_URL` | Staging/prod recommended | **Backup only** — Railway Postgres URL; periodic primary→backup upsert target. Do not use as primary except DR |
+| `BACKUP_SYNC_INTERVAL_MS` | No | Mirror interval when backup is set (default `300000`; minimum `30000`) |
+| `ALLOW_RAILWAY_PRIMARY` | No | Disaster recovery only. If truthy, allows Railway as `DATABASE_URL` primary; otherwise the API refuses to boot on a Railway primary host |
 | `SUPABASE_JWT_SECRET` | Yes | Verifies the JWT from Supabase Auth (JWT Secret in project settings) |
-| `SUPABASE_URL` | For photos / admin Auth | Project URL |
+| `SUPABASE_URL` | For photos / admin Auth | Project URL (must match the same Supabase project as `DATABASE_URL`) |
 | `SUPABASE_SERVICE_ROLE_KEY` | For photos / admin Auth | Server-side Supabase client — never expose to the browser |
 | `PORT` | No | Defaults to `4000` |
 | `FRONTEND_URL` | Recommended | Password-reset redirects |
@@ -193,6 +217,8 @@ Local CORS fallback (only when `NODE_ENV` is not `production` and `CORS_ORIGINS`
 ## Database
 
 Schema: [`backend/prisma/schema.prisma`](backend/prisma/schema.prisma).
+
+**Deployed policy (NSB-51):** Supabase Postgres is the **primary** source of truth for Member / Event / Attendance / Friends / Points. Railway Postgres is **backup only** (kept running; mirrored on an interval when `BACKUP_DATABASE_URL` is set). Auth stays on Supabase Auth. Ops cutover, failover, and `npm run db:sync-backup` are documented in [`docs/database-primary-backup.md`](docs/database-primary-backup.md). Verify hosts with `GET /api/health/db` (hostnames only).
 
 This repo does not currently ship a `prisma/migrations` history. For local development, push the schema directly:
 
@@ -318,11 +344,12 @@ Most pages are client components (`"use client"`) because they need the JWT in t
 | `/events/[id]/edit` | Admin | Edit event |
 | `/checkin` | Member | Camera QR scanner |
 | `/attendance` | Member | Personal history |
-| `/members` | Member | Directory |
+| `/members` | Member | Redirects to `/friends` |
 | `/members/[id]` | Member | Public profile |
 | `/achievements` | Member | 111 / 333 progress |
 | `/leaderboard` | Member | Attendance / achievement ranks |
 | `/friends` | Member | Friends and requests |
+| `/changelog` | Member | What's new / patch notes |
 | `/settings` | Member | Profile and photo |
 | `/forgot-password` · `/reset-password` | Public | Reset flow |
 | `/auth/callback` | Public | OAuth return |
@@ -336,6 +363,8 @@ Most pages are client components (`"use client"`) because they need the JWT in t
 | `/admin/points` | Admin | Leaderboard, bulk award, history |
 
 Path alias: `@/*` → frontend root (`import { cn } from "@/lib/utils"`).
+
+**Changelog:** Signed-in members open **What's new** in the sidebar or top bar (`/changelog`). Entries live in `frontend/content/changelog.json` (newest first). Add an object with `version` (unique id, e.g. `2025-08-19`), `date` (ISO `YYYY-MM-DD`), and a one-sentence `summary`. The sidebar shows an unread dot until a member opens the page; clearing uses `localStorage` keyed by `version`.
 
 ---
 
@@ -372,6 +401,9 @@ Unless noted, routes expect a valid Supabase JWT. Admin-only routes also require
 | `GET` | `/members/admins` | Admin list |
 | `PUT` | `/members/:id/role` | Super admin |
 | `PUT` | `/members/:id/status` | Activate / deactivate |
+| `PUT` | `/members/:id/membership` | Mark chapter dues paid / unpaid (admin) |
+
+Chapter membership uses a check-on-read reset: if a member is marked paid but `chapterMembershipMarkedAt` is before the most recently elapsed **July 31 23:59 America/New_York** boundary, status is treated as unpaid until an admin re-marks it (Aug 1–July 31 membership year).
 
 ### Events — `/api/events`
 
@@ -564,7 +596,7 @@ If you reduce ESLint errors, lower `MAX_ERRORS` in the same PR so the improvemen
 **Frontend (Vercel)**
 
 - Root / app directory: `frontend`
-- Node 20
+- Node 22
 - Production URL: `https://nsbe-ucf-eventtracker-six.vercel.app`
 - Set the `NEXT_PUBLIC_*` variables (see checklist below)
 - Point `NEXT_PUBLIC_API_URL` at the Railway API (`https://nsbe-ucf-eventtracker-production-4454.up.railway.app/api`) **or** rewrite `/api` to the backend and leave the variable unset
@@ -573,15 +605,17 @@ If you reduce ESLint errors, lower `MAX_ERRORS` in the same PR so the improvemen
 
 - Production URL: `https://nsbe-ucf-eventtracker-production-4454.up.railway.app`
 - Bind to `0.0.0.0:$PORT` (Nest uses `process.env.PORT`, which Railway/Render inject)
-- Image: `backend/Dockerfile` (multi-stage, `node:20-alpine`, user `nestjs`)
+- Image: `backend/Dockerfile` (multi-stage, `node:22-alpine`, user `nestjs`)
 - On Compose start: `prisma migrate deploy && npm run start:prod` — you need a migration history for that path
-- Production env must include `CORS_ORIGINS`, `FRONTEND_URL`, `APP_BASE_URL`, `DATABASE_URL`, `DIRECT_URL`, `SUPABASE_JWT_SECRET`, and (if used) OAuth + `API_KEY`
+- Production/staging env must include `CORS_ORIGINS`, `FRONTEND_URL`, `APP_BASE_URL`, `DATABASE_URL`, `DIRECT_URL` (**Supabase** hosts), `SUPABASE_JWT_SECRET`, and (if used) OAuth + `API_KEY`
+- Set `BACKUP_DATABASE_URL` to Railway Postgres; leave `ALLOW_RAILWAY_PRIMARY` unset except documented DR ([`docs/database-primary-backup.md`](docs/database-primary-backup.md))
 - Example production alignment: `CORS_ORIGINS`, `FRONTEND_URL`, and `APP_BASE_URL` all set to `https://nsbe-ucf-eventtracker-six.vercel.app`
 - Filesystem is ephemeral; do not write uploads to disk — photos go to Supabase Storage
 
 **Supabase** (project `nsbe-app`, ref `hzcdeyzpdqhucypmiqey`)
 
 - Copy the JWT secret into `SUPABASE_JWT_SECRET`
+- Point `DATABASE_URL` / `DIRECT_URL` at **this same** project’s Postgres (not Railway)
 - Create public bucket `profile-photos`
 - **Authentication → URL configuration**
   - Site URL: `https://nsbe-ucf-eventtracker-six.vercel.app`
@@ -609,7 +643,7 @@ If you reduce ESLint errors, lower `MAX_ERRORS` in the same PR so the improvemen
 1. Branch from `main`; keep feature code next to its module (`backend/src/events/*` and `frontend/app/events/*`).
 2. Match existing commit style: short imperative, often Conventional Commits (`feat:`, `fix:`, `style:`).
 3. In the PR: what changed, how you tested, env/schema notes, and screenshots for UI.
-4. Never commit `.env` files or real keys.
+4. Never commit `.env` files, real keys, or `.cursor/mcp.json` (it can hold a Supabase PAT). Use `.cursor/mcp.json.example` and [Supabase MCP](#supabase-mcp-ai-tooling) when onboarding AI tooling.
 5. After `schema.prisma` edits: `npx prisma generate`, and record how to migrate/push.
 
 Agent-oriented notes (architecture dump, coding agent rules) live in [`docs/OVERVIEW.md`](docs/OVERVIEW.md), [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md), and [`AGENTS.md`](AGENTS.md). Point-system design tickets: [`docs/pointsystem-tickets/README.md`](docs/pointsystem-tickets/README.md).

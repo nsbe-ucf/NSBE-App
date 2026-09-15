@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "vercel": {
+      "url": "https://mcp.vercel.com"
+    },
+    "supabase-nsbe": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=hzcdeyzpdqhucypmiqey",
+      "headers": {
+        "Authorization": "Bearer ${env:SUPABASE_ACCESS_TOKEN}"
+      }
+    }
+  }
+}

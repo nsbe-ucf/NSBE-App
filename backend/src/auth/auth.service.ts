@@ -1,10 +1,11 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient } from '@supabase/supabase-js';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private supabaseAdmin: ReturnType<typeof createClient> | null = null;
 
   constructor(
@@ -12,7 +13,9 @@ export class AuthService {
     private configService: ConfigService,
   ) {
     const supabaseUrl = this.configService.get<string>('SUPABASE_URL');
-    const supabaseServiceKey = this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY');
+    const supabaseServiceKey = this.configService.get<string>(
+      'SUPABASE_SERVICE_ROLE_KEY',
+    );
     if (supabaseUrl && supabaseServiceKey) {
       this.supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
         auth: { autoRefreshToken: false, persistSession: false },
@@ -188,27 +191,31 @@ export class AuthService {
       throw new Error('Supabase Admin not configured');
     }
 
-    // Check if user exists
-    const member = await this.prisma.member.findUnique({
-      where: { email },
-    });
+    // Always hit Supabase with the same work for any email so missing vs
+    // existing accounts are not distinguishable by status or timing.
+    const normalizedEmail = email.toLowerCase().trim();
 
-    if (!member) {
-      // Don't reveal whether email exists or not for security
-      return { success: true, message: 'If an account exists, a password reset email has been sent.' };
-    }
-
-    // Send password reset email via Supabase
-    // Supabase will redirect to auth/callback first, which will then redirect to reset-password
-    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
-    const { error } = await this.supabaseAdmin.auth.resetPasswordForEmail(email, {
-      redirectTo: `${frontendUrl}/auth/callback`,
-    });
+    // Redirect straight to /reset-password so the recovery hash/code is not
+    // lost on an intermediate client-side hop through /auth/callback.
+    // /reset-password must be listed in the Supabase Auth redirect allow-list.
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+    const { error } = await this.supabaseAdmin.auth.resetPasswordForEmail(
+      normalizedEmail,
+      {
+        redirectTo: `${frontendUrl.replace(/\/$/, '')}/reset-password`,
+      },
+    );
 
     if (error) {
-      throw new Error(`Failed to send password reset email: ${error.message}`);
+      this.logger.error(
+        `Password reset email failed for a request: ${error.message}`,
+      );
     }
 
-    return { success: true, message: 'If an account exists, a password reset email has been sent.' };
+    return {
+      success: true,
+      message: 'If an account exists, a password reset email has been sent.',
+    };
   }
 }

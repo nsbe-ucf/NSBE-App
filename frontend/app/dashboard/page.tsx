@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Dashboard } from "@/components/Dashboard";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { MembershipBadge } from "@/components/MembershipBadge";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -18,6 +19,9 @@ export default function DashboardPage() {
     gbmAttended: 0,
     communityServiceAttended: 0,
   });
+  const [chapterMembershipActive, setChapterMembershipActive] = useState<
+    boolean | null
+  >(null);
   const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
   const [plannedEvents, setPlannedEvents] = useState<any[]>([]);
@@ -34,9 +38,14 @@ export default function DashboardPage() {
     // Fetch fresh user data from backend and update localStorage
     const fetchData = async () => {
       try {
-        // Fetch all data in parallel
-        const [userData, records, eventsData, myPlans] = await Promise.all([
-          api.getMe(token),
+        const userData = await api.getMe(token);
+        setChapterMembershipActive(
+          typeof userData.chapterMembershipActive === "boolean"
+            ? userData.chapterMembershipActive
+            : null,
+        );
+
+        const [records, eventsData, myPlans] = await Promise.all([
           api.getMyAttendance(token),
           api.getEvents(token, true),
           api.getMyPlannedEvents(token),
@@ -141,7 +150,10 @@ export default function DashboardPage() {
         console.error("Failed to fetch data:", error);
 
         // If token is invalid (401), redirect to login
-        if (error.message && error.message.includes("401")) {
+        if (
+          error.message === "Session expired" ||
+          error.message?.includes("401")
+        ) {
           localStorage.removeItem("token");
           localStorage.removeItem("user");
           router.push("/");
@@ -190,6 +202,9 @@ export default function DashboardPage() {
 
   return (
     <DashboardLayout>
+      <div className="px-4 pt-4 lg:px-8">
+        <MembershipBadge chapterMembershipActive={chapterMembershipActive} />
+      </div>
       <Dashboard
         memberData={memberData}
         attendanceRecords={attendanceRecords}

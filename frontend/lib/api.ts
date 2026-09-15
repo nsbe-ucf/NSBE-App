@@ -125,6 +125,115 @@ export interface ResolvedMembersResult {
   unresolved: string[];
 }
 
+/** JSON shape returned by GET /members/me/export (dates as ISO strings). */
+export interface MemberExportEvent {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  semester: string;
+  startTime: string;
+  endTime: string;
+  location: string | null;
+  isActive: boolean;
+}
+
+export interface MemberExportPayload {
+  exportedAt: string;
+  profile: {
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    role: string;
+    createdAt: string;
+    updatedAt: string;
+    emailVerified: boolean;
+    isActive: boolean;
+    bio: string | null;
+    discordUsername: string | null;
+    graduationYear: number | null;
+    linkedInUrl: string | null;
+    major: string | null;
+    phoneNumber: string | null;
+    photoUrl: string | null;
+    hasPassword: boolean;
+  };
+  oauthAccounts: Array<{
+    id: string;
+    provider: string;
+    providerEmail: string | null;
+    emailVerified: boolean;
+    createdAt: string;
+  }>;
+  attendance: Array<{
+    id: string;
+    checkedInAt: string;
+    checkInMethod: string;
+    event: MemberExportEvent;
+  }>;
+  eventInterests: Array<{
+    id: string;
+    status: string;
+    createdAt: string;
+    updatedAt: string;
+    event: MemberExportEvent;
+  }>;
+  achievements: {
+    oneOneOne: {
+      completed: boolean;
+      completedAt?: string;
+      progress: { bucket1: number; bucket2: number; bucket3: number };
+    };
+    threeThreeThree: {
+      completed: boolean;
+      completedAt?: string;
+      progress: { bucket1: number; bucket2: number; bucket3: number };
+    };
+  };
+  achievementsBySemester: Array<{
+    semester: string;
+    workshopsSocials: number;
+    fundraiserCommunityService: number;
+    gbm: number;
+    has111: boolean;
+    has333: boolean;
+    completed111At?: string;
+    completed333At?: string;
+  }>;
+  points: {
+    bySemester: Array<{
+      semester: string;
+      totalPoints: number;
+      zones: {
+        general: number;
+        communication: number;
+        program: number;
+        parliamentarian: number;
+      };
+      manualEntries: Array<{
+        id: string;
+        pointTypeKey: string;
+        points: number;
+        semester: string;
+        label: string | null;
+        note: string | null;
+        createdAt: string;
+        awardedByName?: string;
+      }>;
+      autoEntries: Array<{
+        pointTypeKey: string;
+        label: string;
+        points: number;
+        zone: string;
+        eventId: string;
+        eventName: string;
+        eventStartTime: string;
+      }>;
+    }>;
+  };
+}
+
 export const api = {
   // Auth
   login: async (credentials: { email: string; password: string }) => {
@@ -137,10 +246,19 @@ export const api = {
   },
 
   // OAuth
-  getOAuthUrl: (provider: "google" | "discord", redirectUri?: string) => {
+  getOAuthUrl: (
+    provider: "google" | "discord",
+    redirectUri?: string,
+    mode?: "login" | "signup",
+  ) => {
     const params = new URLSearchParams();
     if (redirectUri) {
       params.set("redirect_uri", redirectUri);
+    }
+    // Backend uses APP_BASE_URL for the post-callback redirect; mode controls
+    // whether a brand-new Member may be created (login = refuse).
+    if (mode) {
+      params.set("mode", mode);
     }
     return `${API_URL}/auth/oauth/${provider}?${params.toString()}`;
   },
@@ -188,11 +306,9 @@ export const api = {
       headers: apiHeaders({ Authorization: `Bearer ${token}` }),
     });
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("getMe API error:", response.status, errorText);
-      throw new Error(`Failed to fetch user data: ${response.statusText}`);
+      console.error("getMe API error:", response.status);
     }
-    return response.json();
+    return handleResponse(response);
   },
 
   updateMe: async (
@@ -776,5 +892,77 @@ export const api = {
       headers: apiHeaders({ Authorization: `Bearer ${token}` }),
     });
     return handleResponse(response);
+  },
+
+  updateMyDuesStatus: async (
+    token: string,
+    data: {
+      chapterDuesSelfReported?: boolean;
+      nationalDuesSelfReported?: boolean;
+    }
+  ) => {
+    const response = await fetch(`${API_URL}/members/me`, {
+      method: "PUT",
+      headers: apiHeaders({
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      }),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || "Failed to update dues status");
+    }
+    return response.json();
+  },
+
+  updateMemberMembership: async (token: string, memberId: string, chapterMembershipActive: boolean) => {
+    const response = await fetch(`${API_URL}/members/${memberId}/membership`, {
+      method: 'PUT',
+      headers: apiHeaders({
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      }),
+      body: JSON.stringify({ chapterMembershipActive }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || `Failed to update chapter membership: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  updateMemberDues: async (
+    token: string,
+    memberId: string,
+    data: {
+      chapterDuesSelfReported?: boolean;
+      nationalDuesSelfReported?: boolean;
+    }
+  ) => {
+    const response = await fetch(`${API_URL}/members/${memberId}/dues`, {
+      method: "PUT",
+      headers: apiHeaders({
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      }),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || "Failed to update member dues");
+    }
+    return response.json();
+  },
+
+  exportMyData: async (token: string): Promise<MemberExportPayload> => {
+    const response = await fetch(`${API_URL}/members/me/export`, {
+      headers: apiHeaders({ Authorization: `Bearer ${token}` }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to export data');
+    }
+    return response.json();
   },
 };

@@ -60,6 +60,7 @@ import { ConnectedAccounts } from "./settings/ConnectedAccounts";
 
 interface SettingsProps {
   onBack: () => void;
+  duesReady?: boolean;
   memberData: {
     id: string;
     email: string;
@@ -69,6 +70,8 @@ interface SettingsProps {
     graduationYear?: number;
     profilePhoto?: string;
     hasPassword?: boolean;
+    chapterDuesSelfReported?: boolean;
+    nationalDuesSelfReported?: boolean;
   };
 }
 
@@ -79,7 +82,7 @@ type SettingsTab =
   | "appearance"
   | "connections";
 
-export function Settings({ onBack, memberData }: SettingsProps) {
+export function Settings({ onBack, memberData, duesReady = false }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
 
   const tabs = [
@@ -351,7 +354,10 @@ export function Settings({ onBack, memberData }: SettingsProps) {
                   className="p-4 sm:p-6"
                 >
                   {activeTab === "profile" && (
-                    <ProfileSettings memberData={memberData} />
+                    <ProfileSettings
+                      memberData={memberData}
+                      duesReady={duesReady}
+                    />
                   )}
                   {activeTab === "account" && (
                     <AccountSettings memberData={memberData} />

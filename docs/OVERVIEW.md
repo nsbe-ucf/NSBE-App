@@ -38,7 +38,7 @@ Live deployment: frontend on Vercel, backend on Railway, database and auth via S
 | Toasts | `sonner` | 2 |
 | In-memory cache | `node-cache` | 5 |
 | Node runtime | Node.js | 20.x |
-| Container | Docker (multi-stage, `node:20-alpine`) | — |
+| Container | Docker (multi-stage, `node:22-alpine`) | — |
 
 **Rationale highlights:**
 

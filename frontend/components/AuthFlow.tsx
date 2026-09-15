@@ -36,7 +36,6 @@ export function AuthFlow({ onAuthComplete }: AuthFlowProps) {
     lastName: "",
     role: "member",
   });
-  const [resetToken, setResetToken] = useState("");
 
   // Authentication handlers with real Supabase integration
   const handleLogin = async (email: string, password: string) => {
@@ -54,7 +53,9 @@ export function AuthFlow({ onAuthComplete }: AuthFlowProps) {
       if (data.session) {
         localStorage.setItem("token", data.session.access_token);
 
-        // Fetch member data from backend to get role
+        // Fetch member data from backend to get role. Do not proceed with a
+        // fake "member" role if this fails — that masked backend outages as a
+        // successful login and then tripped Session Expired on the next call.
         try {
           const memberData = await api.getMe(data.session.access_token);
 
@@ -87,21 +88,28 @@ export function AuthFlow({ onAuthComplete }: AuthFlowProps) {
           };
 
           onAuthComplete(userData);
-        } catch (memberError) {
+        } catch (memberError: any) {
           console.error("Failed to fetch member data:", memberError);
 
-          // Fallback: use basic user data
-          toast.success("Welcome back!", {
-            description: "You have successfully signed in.",
-          });
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          try {
+            await supabase.auth.signOut();
+          } catch (signOutErr) {
+            console.warn("Could not clear Supabase session after login failure:", signOutErr);
+          }
 
-          const user = data.user;
-          onAuthComplete({
-            email: user?.email || email,
-            firstName: user?.user_metadata?.first_name || "User",
-            lastName: user?.user_metadata?.last_name || "",
-            role: "member",
+          const message = String(memberError?.message || "");
+          const isSessionError =
+            message === "Session expired" ||
+            /401|unauthorized|invalid token/i.test(message);
+
+          toast.error("Login could not complete", {
+            description: isSessionError
+              ? "Your session could not be verified. Please try again."
+              : "The backend is unavailable or misconfigured. Please try again later.",
           });
+          // Stay on login — do not call onAuthComplete
         }
       }
     } catch (error: any) {
@@ -193,56 +201,10 @@ export function AuthFlow({ onAuthComplete }: AuthFlowProps) {
     }
   };
 
-  const handleForgotPassword = async (email: string) => {
-    setIsLoading(true);
+  // Forgot/reset password: ForgotPassword uses api.forgotPassword (backend).
+  // Email links land on /reset-password, which calls supabase.auth.updateUser.
+  // Do not call Supabase resetPasswordForEmail from the client here.
 
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${getOAuthRedirectBase()}/reset-password`,
-      });
-
-      if (error) throw error;
-
-      toast.success("Email sent!", {
-        description: "Check your inbox for password reset instructions.",
-      });
-
-      // Store email for reference
-      setUserData({ ...userData, email });
-
-      // In production, user clicks link in email
-      // For now, show success message
-      setTimeout(() => {
-        setCurrentPage("login");
-      }, 3000);
-    } catch (error: any) {
-      toast.error("Failed to send reset email", {
-        description: error.message,
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleResetPassword = async (password: string, token: string) => {
-    setIsLoading(true);
-
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false);
-
-      toast.success("Password reset successful!", {
-        description: "You can now sign in with your new password.",
-      });
-
-      setCurrentPage("success-password-reset");
-
-      // Auto-navigate to login after 3 seconds
-      setTimeout(() => {
-        setCurrentPage("login");
-      }, 3000);
-    }, 1500);
-  };
 
   const handleOnboardingComplete = () => {
     toast.success("You're all set!", {

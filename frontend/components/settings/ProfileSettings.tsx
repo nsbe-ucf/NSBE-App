@@ -6,6 +6,8 @@ import { Textarea } from "../ui/textarea";
 import { User, Upload, X, Camera, Loader2, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { getApiUrl, apiHeaders } from "@/lib/api";
+import { DuesStatusSection } from "./DuesStatusSection";
+import { MembershipStatusSection } from "./MembershipStatusSection";
 
 interface ProfileSettingsProps {
   memberData: {
@@ -16,7 +18,10 @@ interface ProfileSettingsProps {
     major?: string;
     graduationYear?: number;
     profilePhoto?: string;
+    chapterDuesSelfReported?: boolean;
+    nationalDuesSelfReported?: boolean;
   };
+  duesReady?: boolean;
 }
 
 const MAJORS = [
@@ -38,7 +43,10 @@ const GRADUATION_YEARS = Array.from(
   (_, i) => new Date().getFullYear() + i
 );
 
-export function ProfileSettings({ memberData }: ProfileSettingsProps) {
+export function ProfileSettings({
+  memberData,
+  duesReady = false,
+}: ProfileSettingsProps) {
   const [formData, setFormData] = useState({
     firstName: memberData.firstName || "",
     lastName: memberData.lastName || "",
@@ -52,6 +60,10 @@ export function ProfileSettings({ memberData }: ProfileSettingsProps) {
   });
   const [profilePhoto, setProfilePhoto] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
+  const [chapterMembershipActive, setChapterMembershipActive] = useState<
+    boolean | null
+  >(null);
+  const [profileReady, setProfileReady] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -80,9 +92,17 @@ export function ProfileSettings({ memberData }: ProfileSettingsProps) {
           });
           setProfilePhoto(data.photoUrl || "");
           setPreviewUrl(data.photoUrl || "");
+          setChapterMembershipActive(
+            typeof data.chapterMembershipActive === "boolean"
+              ? data.chapterMembershipActive
+              : null,
+          );
+          setProfileReady(true);
         }
       } catch (error) {
         console.error('Failed to fetch member data:', error);
+        setChapterMembershipActive(null);
+        setProfileReady(false);
       }
     };
 
@@ -523,6 +543,10 @@ export function ProfileSettings({ memberData }: ProfileSettingsProps) {
         </div>
       )}
 
+      <MembershipStatusSection
+        chapterMembershipActive={chapterMembershipActive}
+      />
+
       {/* Info Box */}
       <div className="bg-[#1a1a1a] border border-white/10 rounded-lg p-4">
         <h4 className="font-semibold text-white text-sm mb-2">
@@ -540,6 +564,12 @@ export function ProfileSettings({ memberData }: ProfileSettingsProps) {
           <li>• Contact info helps other members and officers connect with you</li>
         </ul>
       </div>
+
+      <DuesStatusSection
+        chapterDuesSelfReported={memberData.chapterDuesSelfReported}
+        nationalDuesSelfReported={memberData.nationalDuesSelfReported}
+        ready={duesReady || profileReady}
+      />
     </div>
   );
 }

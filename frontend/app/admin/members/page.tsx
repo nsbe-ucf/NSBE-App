@@ -47,11 +47,14 @@ export default function MemberManagementPage() {
           email: member.email,
           role: role,
           isActive: member.isActive ?? true,
+          chapterMembershipActive: member.chapterMembershipActive ?? false,
           workshopsAttended: member.workshopsAttended ?? 0,
           gbmAttended: member.gbmAttended ?? 0,
           communityServiceAttended: member.communityServiceAttended ?? 0,
           totalEvents: member.totalEvents ?? 0,
           joinedDate: member.createdAt || new Date().toISOString(),
+          chapterDuesSelfReported: member.chapterDuesSelfReported ?? false,
+          nationalDuesSelfReported: member.nationalDuesSelfReported ?? false,
         };
       });
       
@@ -113,6 +116,45 @@ export default function MemberManagementPage() {
     }
   };
 
+  const handleUpdateDues = async (
+    memberId: string,
+    data: {
+      chapterDuesSelfReported?: boolean;
+      nationalDuesSelfReported?: boolean;
+    }
+  ) => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+
+      await api.updateMemberDues(token, memberId, data);
+      toast.success("Self-reported dues updated");
+      fetchMembers();
+    } catch (error) {
+      console.error("Failed to update member dues:", error);
+      toast.error("Failed to update self-reported dues");
+    }
+  };
+
+  const handleToggleMembership = async (
+    memberId: string,
+    chapterMembershipActive: boolean,
+  ) => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+
+      await api.updateMemberMembership(token, memberId, chapterMembershipActive);
+      toast.success(
+        `Chapter membership marked ${chapterMembershipActive ? "paid" : "unpaid"}`,
+      );
+      fetchMembers();
+    } catch (error) {
+      console.error("Failed to toggle chapter membership:", error);
+      toast.error("Failed to update chapter membership");
+    }
+  };
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -130,6 +172,8 @@ export default function MemberManagementPage() {
         onEditMember={handleEditMember}
         onViewMember={handleViewMember}
         onToggleStatus={handleToggleStatus}
+        onUpdateDues={handleUpdateDues}
+        onToggleMembership={handleToggleMembership}
       />
     </DashboardLayout>
   );

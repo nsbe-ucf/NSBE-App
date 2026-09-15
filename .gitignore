@@ -39,6 +39,10 @@ coverage/
 .nyc_output/
 backend/coverage/
 
+# Cursor MCP config can contain personal access tokens. Keep a
+# secret-free copy at .cursor/mcp.json.example.
+.cursor/mcp.json
+
 # Environment variables
 .env
 .env.local

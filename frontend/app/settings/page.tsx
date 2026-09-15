@@ -14,10 +14,13 @@ export default function SettingsPage() {
     firstName: "",
     lastName: "",
     major: "",
-    graduationYear: undefined,
+    graduationYear: undefined as number | undefined,
     profilePhoto: "",
     hasPassword: true,
+    chapterDuesSelfReported: false,
+    nationalDuesSelfReported: false,
   });
+  const [duesReady, setDuesReady] = useState(false);
 
   useEffect(() => {
     const userStr = localStorage.getItem("user");
@@ -44,8 +47,13 @@ export default function SettingsPage() {
           graduationYear: data.graduationYear ?? prev.graduationYear,
           profilePhoto: data.photoUrl ?? prev.profilePhoto,
           hasPassword: data.hasPassword ?? true,
+          chapterDuesSelfReported: !!data.chapterDuesSelfReported,
+          nationalDuesSelfReported: !!data.nationalDuesSelfReported,
         }));
-      }).catch(() => {});
+        setDuesReady(true);
+      }).catch(() => {
+        setDuesReady(false);
+      });
     }
   }, []);
 
@@ -55,7 +63,11 @@ export default function SettingsPage() {
 
   return (
     <DashboardLayout>
-      <Settings memberData={memberData} onBack={handleBack} />
+      <Settings
+        memberData={memberData}
+        duesReady={duesReady}
+        onBack={handleBack}
+      />
     </DashboardLayout>
   );
 }

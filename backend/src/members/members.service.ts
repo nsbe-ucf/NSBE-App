@@ -1,14 +1,51 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
 import { UpdateMemberDto } from './dto/update-member.dto';
+import { UpdateMemberDuesDto } from './dto/update-dues.dto';
 import { MemberProfileDto } from './dto/member-profile.dto';
-import { EventCategory } from '@prisma/client';
+import { EventCategory, EventInterestStatus } from '@prisma/client';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import {
+  getMostRecentJuly31DeadlineET,
+  resolveChapterMembershipActive,
+  shouldResetChapterMembership,
+} from './chapter-membership.util';
+
+/** Safe fields returned from member update routes (never passwordHash). */
+export const ADMIN_MEMBER_UPDATE_SELECT = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  role: true,
+  createdAt: true,
+  emailVerified: true,
+  updatedAt: true,
+  isActive: true,
+  chapterMembershipActive: true,
+  chapterMembershipMarkedAt: true,
+  bio: true,
+  discordUsername: true,
+  graduationYear: true,
+  linkedInUrl: true,
+  major: true,
+  phoneNumber: true,
+  photoUrl: true,
+  chapterDuesSelfReported: true,
+  nationalDuesSelfReported: true,
+  chapterDuesReportedAt: true,
+  nationalDuesReportedAt: true,
+} as const;
 
 /**
- * Maps an event category to its bucket for statistics calculation
+ * Maps an event category to its achievement bucket key.
  */
-function getEventBucket(category: EventCategory): string {
+export function getEventBucket(category: EventCategory): string {
   switch (category) {
     case EventCategory.WORKSHOP:
     case EventCategory.SOCIAL:
@@ -23,6 +60,31 @@ function getEventBucket(category: EventCategory): string {
   }
 }
 
+function buildDuesUpdateData(dto: {
+  chapterDuesSelfReported?: boolean;
+  nationalDuesSelfReported?: boolean;
+}) {
+  const data: {
+    chapterDuesSelfReported?: boolean;
+    nationalDuesSelfReported?: boolean;
+    chapterDuesReportedAt?: Date | null;
+    nationalDuesReportedAt?: Date | null;
+  } = {};
+  const now = new Date();
+
+  if (dto.chapterDuesSelfReported !== undefined) {
+    data.chapterDuesSelfReported = dto.chapterDuesSelfReported;
+    data.chapterDuesReportedAt = dto.chapterDuesSelfReported ? now : null;
+  }
+
+  if (dto.nationalDuesSelfReported !== undefined) {
+    data.nationalDuesSelfReported = dto.nationalDuesSelfReported;
+    data.nationalDuesReportedAt = dto.nationalDuesSelfReported ? now : null;
+  }
+
+  return data;
+}
+
 @Injectable()
 export class MembersService {
   constructor(
@@ -32,10 +94,10 @@ export class MembersService {
 
   async findMe(userId: string) {
     // Cache JWT user lookups for 5 minutes to reduce DB load on every request
-    return this.cache.wrap(
+    const member = await this.cache.wrap(
       `user:${userId}`,
       async () => {
-        const member = await this.prisma.member.findUnique({
+        const row = await this.prisma.member.findUnique({
           where: { id: userId },
           include: {
             oauthAccounts: {
@@ -44,12 +106,12 @@ export class MembersService {
           },
         });
 
-        if (!member) {
+        if (!row) {
           return null;
         }
 
         // Transform response to include auth methods without exposing password hash
-        const { passwordHash, oauthAccounts, ...memberData } = member;
+        const { passwordHash, oauthAccounts, ...memberData } = row;
         return {
           ...memberData,
           hasPassword: !!passwordHash,
@@ -58,16 +120,75 @@ export class MembersService {
       },
       300, // 5 minutes
     );
+
+    if (!member) {
+      return null;
+    }
+
+    const membership = await this.applyChapterMembershipReset({
+      id: userId,
+      chapterMembershipActive: member.chapterMembershipActive ?? false,
+      chapterMembershipMarkedAt: member.chapterMembershipMarkedAt ?? null,
+    });
+
+    return {
+      ...member,
+      chapterMembershipActive: membership.chapterMembershipActive,
+      chapterMembershipMarkedAt: membership.chapterMembershipMarkedAt,
+    };
   }
 
   async updateMe(userId: string, dto: UpdateMemberDto) {
+    const {
+      chapterDuesSelfReported,
+      nationalDuesSelfReported,
+      ...profileData
+    } = dto;
+    const duesData = buildDuesUpdateData({
+      chapterDuesSelfReported,
+      nationalDuesSelfReported,
+    });
+
     const result = await this.prisma.member.update({
       where: { id: userId },
-      data: dto,
+      data: {
+        ...profileData,
+        ...duesData,
+      },
+      select: ADMIN_MEMBER_UPDATE_SELECT,
     });
-    // Invalidate user cache on update
+    // Invalidate user + admin list caches so dues show up immediately
     this.cache.del(`user:${userId}`);
+    this.cache.delPattern('members:');
     return result;
+  }
+
+  async updateMemberDues(memberId: string, dto: UpdateMemberDuesDto) {
+    if (
+      dto.chapterDuesSelfReported === undefined &&
+      dto.nationalDuesSelfReported === undefined
+    ) {
+      throw new BadRequestException('At least one dues field must be provided');
+    }
+
+    try {
+      const result = await this.prisma.member.update({
+        where: { id: memberId },
+        data: buildDuesUpdateData(dto),
+        select: ADMIN_MEMBER_UPDATE_SELECT,
+      });
+      this.cache.del(`user:${memberId}`);
+      this.cache.delPattern('members:');
+      return result;
+    } catch (error) {
+      if (
+        error instanceof PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new NotFoundException('Member not found');
+      }
+      throw error;
+    }
   }
 
   async getOAuthAccounts(userId: string) {
@@ -84,7 +205,9 @@ export class MembersService {
   }
 
   async search(query: string) {
-    return this.prisma.member.findMany({
+    await this.batchResetExpiredChapterMemberships();
+
+    const members = await this.prisma.member.findMany({
       where: {
         OR: [
           { email: { contains: query, mode: 'insensitive' } },
@@ -103,12 +226,24 @@ export class MembersService {
         lastName: true,
         role: true,
         isActive: true,
+        chapterMembershipActive: true,
+        chapterMembershipMarkedAt: true,
         photoUrl: true,
+        chapterDuesSelfReported: true,
+        nationalDuesSelfReported: true,
         major: true,
         graduationYear: true,
       },
       take: 20,
     });
+
+    return members.map((member) => ({
+      ...member,
+      chapterMembershipActive: resolveChapterMembershipActive(
+        member.chapterMembershipActive,
+        member.chapterMembershipMarkedAt,
+      ),
+    }));
   }
 
   /**
@@ -146,11 +281,140 @@ export class MembersService {
       throw new NotFoundException('Member not found');
     }
 
-    // Update the member's status
-    return this.prisma.member.update({
+    const result = await this.prisma.member.update({
       where: { id: memberId },
       data: { isActive },
+      select: ADMIN_MEMBER_UPDATE_SELECT,
     });
+    this.cache.del(`user:${memberId}`);
+    this.cache.delPattern('members:');
+    return result;
+  }
+
+  /**
+   * Update chapter membership paid/unpaid status (separate from account isActive).
+   */
+  async updateMemberMembership(
+    memberId: string,
+    chapterMembershipActive: boolean,
+  ) {
+    const member = await this.prisma.member.findUnique({
+      where: { id: memberId },
+    });
+
+    if (!member) {
+      throw new NotFoundException('Member not found');
+    }
+
+    const result = await this.prisma.member.update({
+      where: { id: memberId },
+      data: chapterMembershipActive
+        ? {
+            chapterMembershipActive: true,
+            chapterMembershipMarkedAt: new Date(),
+          }
+        : { chapterMembershipActive: false },
+      select: ADMIN_MEMBER_UPDATE_SELECT,
+    });
+
+    this.cache.del(`user:${memberId}`);
+    this.cache.delPattern('members:');
+    return result;
+  }
+
+  /**
+   * Check-on-read annual reset for chapter membership (America/New_York).
+   * Keeps chapterMembershipMarkedAt for audit when expiring.
+   */
+  async applyChapterMembershipReset(
+    member: {
+      id: string;
+      chapterMembershipActive: boolean;
+      chapterMembershipMarkedAt: Date | null;
+    },
+    now: Date = new Date(),
+  ): Promise<{
+    chapterMembershipActive: boolean;
+    chapterMembershipMarkedAt: Date | null;
+  }> {
+    if (
+      !shouldResetChapterMembership(
+        member.chapterMembershipActive,
+        member.chapterMembershipMarkedAt,
+        now,
+      )
+    ) {
+      return {
+        chapterMembershipActive: member.chapterMembershipActive,
+        chapterMembershipMarkedAt: member.chapterMembershipMarkedAt,
+      };
+    }
+
+    await this.prisma.member.updateMany({
+      where: {
+        id: member.id,
+        chapterMembershipActive: true,
+        OR: [
+          { chapterMembershipMarkedAt: null },
+          {
+            chapterMembershipMarkedAt: {
+              lt: getMostRecentJuly31DeadlineET(now),
+            },
+          },
+        ],
+      },
+      data: { chapterMembershipActive: false },
+    });
+
+    const fresh = await this.prisma.member.findUnique({
+      where: { id: member.id },
+      select: {
+        chapterMembershipActive: true,
+        chapterMembershipMarkedAt: true,
+      },
+    });
+
+    this.cache.del(`user:${member.id}`);
+    this.cache.delPattern('members:');
+
+    if (!fresh) {
+      return {
+        chapterMembershipActive: false,
+        chapterMembershipMarkedAt: member.chapterMembershipMarkedAt,
+      };
+    }
+
+    return {
+      chapterMembershipActive: fresh.chapterMembershipActive,
+      chapterMembershipMarkedAt: fresh.chapterMembershipMarkedAt,
+    };
+  }
+
+  /**
+   * Batch-expire chapter memberships past the July 31 ET deadline.
+   * Used by admin list/search to avoid N per-member writes.
+   */
+  async batchResetExpiredChapterMemberships(
+    now: Date = new Date(),
+  ): Promise<number> {
+    const deadline = getMostRecentJuly31DeadlineET(now);
+
+    const result = await this.prisma.member.updateMany({
+      where: {
+        chapterMembershipActive: true,
+        OR: [
+          { chapterMembershipMarkedAt: null },
+          { chapterMembershipMarkedAt: { lt: deadline } },
+        ],
+      },
+      data: { chapterMembershipActive: false },
+    });
+
+    if (result.count > 0) {
+      this.cache.delPattern('members:');
+    }
+
+    return result.count;
   }
 
   /**
@@ -158,6 +422,8 @@ export class MembersService {
    * @param semester Optional semester filter (if not provided, shows all-time statistics)
    */
   async getAllMembers(semester?: string): Promise<any[]> {
+    await this.batchResetExpiredChapterMemberships();
+
     // Cache member list for 3 minutes
     return this.cache.wrap(
       `members:all:${semester || 'all'}`,
@@ -184,7 +450,7 @@ export class MembersService {
         });
 
         // Calculate statistics for each member
-        return members.map((member) => {
+        const mappedMembers = members.map((member) => {
           const bucketCounts = {
             workshops_socials: 0,
             fundraiser_community_service: 0,
@@ -199,7 +465,8 @@ export class MembersService {
             // Only count categories that are part of achievement buckets
             // COMMITTEE_PARTICIPATION is excluded
             if (
-              attendance.event.category !== EventCategory.COMMITTEE_PARTICIPATION
+              attendance.event.category !==
+              EventCategory.COMMITTEE_PARTICIPATION
             ) {
               bucketCounts[bucket]++;
               totalEvents++;
@@ -213,8 +480,13 @@ export class MembersService {
             lastName: member.lastName,
             role: member.role,
             isActive: member.isActive,
+            chapterMembershipActive: member.chapterMembershipActive,
             createdAt: member.createdAt,
             updatedAt: member.updatedAt,
+            chapterDuesSelfReported: member.chapterDuesSelfReported,
+            nationalDuesSelfReported: member.nationalDuesSelfReported,
+            chapterDuesReportedAt: member.chapterDuesReportedAt,
+            nationalDuesReportedAt: member.nationalDuesReportedAt,
             // Statistics
             workshopsAttended: bucketCounts.workshops_socials,
             gbmAttended: bucketCounts.gbm,
@@ -222,6 +494,8 @@ export class MembersService {
             totalEvents,
           };
         });
+
+        return mappedMembers;
       },
       180, // 3 minutes
     );
@@ -263,13 +537,22 @@ export class MembersService {
   async getMemberProfile(
     memberId: string,
     includePrivate = false,
+    includePlannedEvents = false,
   ): Promise<MemberProfileDto> {
     const member = await this.prisma.member.findUnique({
       where: { id: memberId },
       include: {
         attendance: {
-          include: {
-            event: true,
+          select: {
+            checkedInAt: true,
+            event: {
+              select: {
+                id: true,
+                name: true,
+                startTime: true,
+                category: true,
+              },
+            },
           },
           orderBy: {
             checkedInAt: 'desc',
@@ -286,7 +569,7 @@ export class MembersService {
     // Calculate achievement progress
     const achievements = this.calculateAchievements(member.attendance);
 
-    return {
+    const profile: MemberProfileDto = {
       id: member.id,
       firstName: member.firstName || '',
       lastName: member.lastName || '',
@@ -295,11 +578,15 @@ export class MembersService {
       photoUrl: member.photoUrl ?? undefined,
       major: member.major ?? undefined,
       graduationYear: member.graduationYear ?? undefined,
-      phoneNumber: includePrivate ? member.phoneNumber ?? undefined : undefined,
-      linkedInUrl: includePrivate ? member.linkedInUrl ?? undefined : undefined,
+      phoneNumber: includePrivate
+        ? (member.phoneNumber ?? undefined)
+        : undefined,
+      linkedInUrl: includePrivate
+        ? (member.linkedInUrl ?? undefined)
+        : undefined,
       bio: member.bio ?? undefined,
       discordUsername: includePrivate
-        ? member.discordUsername ?? undefined
+        ? (member.discordUsername ?? undefined)
         : undefined,
       role: member.role,
       isActive: member.isActive,
@@ -314,6 +601,56 @@ export class MembersService {
         checkedInAt: a.checkedInAt,
       })),
     };
+
+    if (includePlannedEvents) {
+      profile.plannedEvents = await this.getMemberPlannedEvents(memberId);
+    }
+
+    return profile;
+  }
+
+  /**
+   * Upcoming events the member marked as planning to attend.
+   * Omits inactive (soft-deleted) events and past events.
+   */
+  private async getMemberPlannedEvents(memberId: string) {
+    const now = new Date();
+    const interests = await this.prisma.eventInterest.findMany({
+      where: {
+        memberId,
+        status: EventInterestStatus.PLANNING,
+        event: {
+          isActive: true,
+          startTime: { gt: now },
+        },
+      },
+      select: {
+        event: {
+          select: {
+            id: true,
+            name: true,
+            startTime: true,
+            endTime: true,
+            location: true,
+            category: true,
+          },
+        },
+      },
+      orderBy: {
+        event: {
+          startTime: 'asc',
+        },
+      },
+    });
+
+    return interests.map((interest) => ({
+      id: interest.event.id,
+      name: interest.event.name,
+      startTime: interest.event.startTime,
+      endTime: interest.event.endTime,
+      location: interest.event.location ?? undefined,
+      category: interest.event.category,
+    }));
   }
 
   /**
@@ -425,7 +762,9 @@ export class MembersService {
     // Find the date when all requirements were met
     for (const a of sorted) {
       if (
-        [EventCategory.WORKSHOP, EventCategory.SOCIAL].includes(a.event.category)
+        [EventCategory.WORKSHOP, EventCategory.SOCIAL].includes(
+          a.event.category,
+        )
       ) {
         bucket1Count++;
       } else if (

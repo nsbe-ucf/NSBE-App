@@ -29,7 +29,7 @@ A full-stack web application for the NSBE (National Society of Black Engineers) 
 | QR scanning | html5-qrcode |
 | Toasts | sonner |
 | Caching | node-cache (in-memory, backend) |
-| Runtime | Node 20.x, npm >=9.0.0 |
+| Runtime | Node 22.x, npm >=9.0.0 |
 
 ---
 
@@ -369,7 +369,7 @@ npx prisma db seed
 | Auth | Supabase Auth |
 | File storage | Supabase Storage |
 
-Docker Compose (`backend/docker-compose.yml`) runs a PostgreSQL container + backend container for self-hosted deployment. Backend Dockerfile uses multi-stage build with `node:20-alpine`, runs as non-root `nestjs` user.
+Docker Compose (`backend/docker-compose.yml`) runs a PostgreSQL container + backend container for self-hosted deployment. Backend Dockerfile uses multi-stage build with `node:22-alpine`, runs as non-root `nestjs` user.
 
 On container start: `prisma migrate deploy && npm run start:prod`
 
